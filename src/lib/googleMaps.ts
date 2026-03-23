@@ -52,7 +52,7 @@ export async function loadGoogleMapsApi(): Promise<GoogleMapsLoadResult> {
     loader = new Loader({
       apiKey,
       version: "weekly",
-      libraries: ["maps", "streetView"],
+      libraries: [],
       language: "ja",
       region: "JP",
     });

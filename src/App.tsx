@@ -1,8 +1,25 @@
-import { useState } from "react";
-import { getGoogleMapsLoadStatus } from "./lib/googleMaps";
+import { useCallback, useMemo, useState } from "react";
 import { ApiStatusNotice } from "./components/ApiStatusNotice";
+import { CameraPreview } from "./components/CameraPreview";
+import { GoogleMapView } from "./components/GoogleMapView";
+import { HoiMapControls } from "./components/HoiMapControls";
 import { MapPlaceholder } from "./components/MapPlaceholder";
+import { StreetViewPanel } from "./components/StreetViewPanel";
+import { MAP_ZOOM } from "./constants/map";
+import { useCamera } from "./hooks/useCamera";
+import { useCurrentLocation } from "./hooks/useCurrentLocation";
+import { useNearbyStreetView } from "./hooks/useNearbyStreetView";
+import { getGoogleMapsLoadStatus } from "./lib/googleMaps";
 import type { MapOrientationMode, ScreenState } from "./types";
+import type { CameraState } from "./types/camera";
+import type { GoogleMapsCoordinates } from "./types/googleMaps";
+import type { CurrentLocationState } from "./types/location";
+import {
+  buildGoogleMapsUrlForMap,
+  buildGoogleMapsUrlForStreetView,
+} from "./utils/googleMapsUrl";
+import { calculateDistanceMeters } from "./utils/location";
+import { normalizeHeading } from "./utils/mapHeading";
 
 type ScreenFrameProps = {
   children: React.ReactNode;
@@ -16,7 +33,7 @@ function ScreenFrame({ children, showBack = false, onBack }: ScreenFrameProps) {
       {showBack ? (
         <button className="icon-button back-button" onClick={onBack} type="button">
           <span aria-hidden="true">←</span>
-          <span>タイトル</span>
+          <span>戻る</span>
         </button>
       ) : null}
       {children}
@@ -27,95 +44,16 @@ function ScreenFrame({ children, showBack = false, onBack }: ScreenFrameProps) {
 type SplitPanelProps = {
   top: React.ReactNode;
   bottom: React.ReactNode;
-  divider?: React.ReactNode;
+  centerAction?: React.ReactNode;
   fullMap?: boolean;
 };
 
-function SplitPanel({ top, bottom, divider, fullMap = false }: SplitPanelProps) {
+function SplitPanel({ top, bottom, centerAction, fullMap = false }: SplitPanelProps) {
   return (
     <div className={`split-layout ${fullMap ? "split-layout--map-full" : ""}`}>
       <div className="panel panel-top">{top}</div>
-      <div className="panel-divider">{divider}</div>
       <div className="panel panel-bottom">{bottom}</div>
-    </div>
-  );
-}
-
-type CameraMockProps = {
-  captured?: boolean;
-};
-
-function CameraMock({ captured = false }: CameraMockProps) {
-  return (
-    <div className={`camera-mock ${captured ? "camera-mock--captured" : ""}`}>
-      <div className="camera-chrome">
-        <span className="status-pill">{captured ? "Captured Photo" : "Camera Preview"}</span>
-        <span className="status-dot" />
-      </div>
-      <div className="camera-grid" />
-      <div className="camera-focus camera-focus--one" />
-      <div className="camera-focus camera-focus--two" />
-      <div className="camera-bottom-label">
-        {captured ? "静止画として固定された状態のモック" : "撮影前プレビューのモック"}
-      </div>
-    </div>
-  );
-}
-
-function StreetViewMock() {
-  return (
-    <div className="street-view-mock">
-      <div className="street-view-horizon" />
-      <div className="street-view-labels">
-        <span className="status-pill">Street View (Mock)</span>
-        <span className="hint-chip">drag to align</span>
-      </div>
-      <div className="street-view-drag">
-        <div className="street-view-drag__track" />
-        <div className="street-view-drag__handle" />
-      </div>
-      <div className="street-view-bottom-label">向きを手動で合わせる体験を表すモック</div>
-    </div>
-  );
-}
-
-function SyncedStreetViewMock() {
-  return (
-    <div className="street-view-mock street-view-mock--synced">
-      <div className="street-view-horizon" />
-      <div className="street-view-labels">
-        <span className="status-pill">Street View Synced Preview</span>
-        <span className="hint-chip">arrow linked</span>
-      </div>
-      <div className="sync-ring" />
-      <div className="street-view-bottom-label">将来的に地図上の向きと連動する想定のモック</div>
-    </div>
-  );
-}
-
-function OrientationToggle({
-  value,
-  onChange,
-}: {
-  value: MapOrientationMode;
-  onChange: (nextValue: MapOrientationMode) => void;
-}) {
-  return (
-    <div className="toggle-group" role="tablist" aria-label="地図の向き切替">
-      <button
-        className={`toggle-button ${value === "north-up" ? "active" : ""}`}
-        onClick={() => onChange("north-up")}
-        type="button"
-      >
-        北固定
-      </button>
-      <button
-        className={`toggle-button ${value === "heading-up" ? "active" : ""}`}
-        onClick={() => onChange("heading-up")}
-        type="button"
-      >
-        進行方向固定
-      </button>
+      {centerAction ? <div className="split-layout__center-action">{centerAction}</div> : null}
     </div>
   );
 }
@@ -125,123 +63,442 @@ export default function App() {
   const [isMapFullscreen, setIsMapFullscreen] = useState(false);
   const [mapOrientationMode, setMapOrientationMode] =
     useState<MapOrientationMode>("north-up");
+  const [viewHeading, setViewHeading] = useState<number | null>(null);
+  const [appPosition, setAppPosition] = useState<GoogleMapsCoordinates | null>(null);
   const mapsStatus = getGoogleMapsLoadStatus();
+  const { locationState, retryLocationRequest, refreshLocationRequest } = useCurrentLocation();
+  const {
+    cameraState,
+    videoRef,
+    captureFrame,
+    retryCamera,
+    clearCapturedImage,
+  } = useCamera(screen === "camera-preview");
+  const { streetViewState } = useNearbyStreetView(
+    screen === "photo-confirmed" || screen === "hoi-completed",
+    locationState,
+  );
+
+  const gpsPosition = useMemo<GoogleMapsCoordinates | null>(() => {
+    if (locationState.status !== "success") {
+      return null;
+    }
+
+    return {
+      latitude: locationState.latitude,
+      longitude: locationState.longitude,
+    };
+  }, [locationState]);
+
+  const streetViewPosition = useMemo<GoogleMapsCoordinates | null>(() => {
+    if (appPosition) {
+      return appPosition;
+    }
+
+    if (streetViewState.status === "success") {
+      return {
+        latitude: streetViewState.panoramaLocationLat,
+        longitude: streetViewState.panoramaLocationLng,
+      };
+    }
+
+    return gpsPosition;
+  }, [appPosition, gpsPosition, streetViewState]);
+
+  const distanceFromGpsMeters = useMemo(() => {
+    if (!gpsPosition) {
+      return null;
+    }
+
+    const targetPosition = streetViewPosition ?? gpsPosition;
+
+    return calculateDistanceMeters(
+      gpsPosition.latitude,
+      gpsPosition.longitude,
+      targetPosition.latitude,
+      targetPosition.longitude,
+    );
+  }, [gpsPosition, streetViewPosition]);
+
+  const mapUrl = useMemo(() => {
+    if (!appPosition) {
+      return null;
+    }
+
+    return buildGoogleMapsUrlForMap(appPosition);
+  }, [appPosition]);
+
+  const streetViewUrl = useMemo(() => {
+    const heading = normalizeHeading(viewHeading);
+
+    if (!appPosition || heading === null) {
+      return null;
+    }
+
+    return buildGoogleMapsUrlForStreetView({
+      latitude: appPosition.latitude,
+      longitude: appPosition.longitude,
+      heading,
+    });
+  }, [appPosition, viewHeading]);
 
   const goToTitle = () => {
     setScreen("title");
     setIsMapFullscreen(false);
     setMapOrientationMode("north-up");
+    setViewHeading(null);
+    setAppPosition(null);
   };
 
-  const startHoi = () => setScreen("camera-preview");
-  const captureMockPhoto = () => setScreen("photo-confirmed");
-  const completeHoi = () => setScreen("hoi-completed");
+  const startHoi = () => {
+    clearCapturedImage();
+    setViewHeading(null);
+    setAppPosition(null);
+    setIsMapFullscreen(false);
+    setMapOrientationMode("north-up");
+    setScreen("camera-preview");
+  };
+
+  const capturePhoto = () => {
+    const imageDataUrl = captureFrame();
+
+    if (imageDataUrl) {
+      setScreen("photo-confirmed");
+    }
+  };
+
+  const completeHoi = () => {
+    setViewHeading((current) => normalizeHeading(current));
+    setAppPosition(gpsPosition);
+    setScreen("hoi-completed");
+  };
+
+  const handleStreetViewHeadingChange = useCallback((heading: number | null) => {
+    setViewHeading(normalizeHeading(heading));
+  }, []);
+
+  const handleStreetViewPositionChange = useCallback((position: GoogleMapsCoordinates | null) => {
+    if (!position) {
+      return;
+    }
+
+    setAppPosition(position);
+  }, []);
+
+  const handleReturnToCurrentLocation = useCallback(async () => {
+    if (gpsPosition) {
+      setAppPosition(gpsPosition);
+      return;
+    }
+
+    const nextLocationState = await refreshLocationRequest();
+
+    if (nextLocationState.status === "success") {
+      setAppPosition({
+        latitude: nextLocationState.latitude,
+        longitude: nextLocationState.longitude,
+      });
+    }
+  }, [gpsPosition, refreshLocationRequest]);
 
   return (
     <main className="app-shell">
-      <div className="phone-stage">
-        <div className="phone-stage__device">
-          <div className="phone-stage__status">
-            <span>9:41</span>
-            <span>HOI Phase 1 Mock</span>
-          </div>
-
-          {screen === "title" ? (
-            <ScreenFrame>
-              <div className="title-screen">
-                <div className="title-screen__map-bg">
-                  <div className="title-screen__roads" />
-                  <div className="title-screen__cards">
-                    <div className="bg-card bg-card--one" />
-                    <div className="bg-card bg-card--two" />
-                    <div className="bg-card bg-card--three" />
+      <div className="app-stage">
+        {screen === "title" ? (
+          <ScreenFrame>
+            <div className="title-screen">
+              <div className="title-screen__map-layer">
+                {mapsStatus.status !== "missing-api-key" && gpsPosition ? (
+                  <GoogleMapView
+                    appPosition={gpsPosition}
+                    className="title-screen__live-map"
+                    interactive={false}
+                    locationState={locationState}
+                    showGpsMarker={false}
+                    variant="background"
+                    zoom={MAP_ZOOM.title}
+                  />
+                ) : (
+                  <div className="title-screen__map-bg">
+                    <div className="title-screen__roads" />
+                    <div className="title-screen__cards">
+                      <div className="bg-card bg-card--one" />
+                      <div className="bg-card bg-card--two" />
+                      <div className="bg-card bg-card--three" />
+                    </div>
                   </div>
-                  <div className="title-screen__overlay" />
-                </div>
+                )}
+              </div>
 
+              <div className="title-screen__overlay-layer">
+                <div className="title-screen__overlay" />
+              </div>
+
+              <div className="title-screen__content-layer">
                 <div className="title-screen__content">
-                  <p className="eyebrow">Phase 1 UI Mock</p>
                   <h1>あっち向いてHOI</h1>
-                  <p className="subtitle">向きを合わせる補助アプリ</p>
-                  <div className="title-screen__api-note">
-                    <ApiStatusNotice
-                      tone={mapsStatus.status === "missing-api-key" ? "warning" : "ready"}
-                      title={mapsStatus.message}
-                      message="Google Maps / Firebase 接続準備フェーズ"
-                    />
-                  </div>
+                  {(locationState.status === "permission-denied" ||
+                    locationState.status === "error") && (
+                    <div className="title-screen__location-note">
+                      <ApiStatusNotice
+                        tone="warning"
+                        title={
+                          locationState.status === "permission-denied"
+                            ? "位置情報を利用できません"
+                            : "位置情報を取得できませんでした"
+                        }
+                        message={locationState.errorMessage}
+                      />
+                    </div>
+                  )}
+                  {(locationState.status === "permission-denied" ||
+                    locationState.status === "error") && (
+                    <button
+                      className="secondary-button title-screen__retry"
+                      onClick={() => void retryLocationRequest()}
+                      type="button"
+                    >
+                      位置情報を再取得
+                    </button>
+                  )}
 
                   <button className="primary-button" onClick={startHoi} type="button">
                     HOIする
                   </button>
                 </div>
               </div>
-            </ScreenFrame>
-          ) : null}
+            </div>
+          </ScreenFrame>
+        ) : null}
 
-          {screen === "camera-preview" ? (
-            <ScreenFrame showBack onBack={goToTitle}>
-              <SplitPanel
-                top={<CameraMock />}
-                divider={
-                  <button className="shutter-button" onClick={captureMockPhoto} type="button">
-                    <span className="shutter-button__inner" />
-                  </button>
-                }
-                bottom={<MapPlaceholder />}
-              />
-            </ScreenFrame>
-          ) : null}
-
-          {screen === "photo-confirmed" ? (
-            <ScreenFrame showBack onBack={goToTitle}>
-              <SplitPanel
-                top={<CameraMock captured />}
-                divider={
-                  <button className="hoi-button" onClick={completeHoi} type="button">
-                    HOI
-                  </button>
-                }
-                bottom={<StreetViewMock />}
-              />
-            </ScreenFrame>
-          ) : null}
-
-          {screen === "hoi-completed" ? (
-            <ScreenFrame showBack onBack={goToTitle}>
-              <SplitPanel
-                fullMap={isMapFullscreen}
-                top={<SyncedStreetViewMock />}
-                bottom={
-                  <div className="map-stage">
-                    <MapPlaceholder
-                      fullMap={isMapFullscreen}
-                      orientationMode={mapOrientationMode}
-                      showMarker
-                      showArrow
-                    />
-
-                    <div className="map-controls">
-                      <OrientationToggle
-                        value={mapOrientationMode}
-                        onChange={setMapOrientationMode}
+        {screen === "camera-preview" ? (
+          <ScreenFrame showBack onBack={goToTitle}>
+            <SplitPanel
+              top={
+                <div className="camera-stage">
+                  <CameraPreview cameraState={cameraState} mode="live" videoRef={videoRef} />
+                  {getCameraNotice(cameraState) && cameraState.status !== "loading" ? (
+                    <div className="camera-stage__notice">
+                      <ApiStatusNotice
+                        tone={getCameraNotice(cameraState)!.tone}
+                        title={getCameraNotice(cameraState)!.title}
+                        message={getCameraNotice(cameraState)!.message}
                       />
-
-                      <button
-                        className="secondary-button"
-                        onClick={() => setIsMapFullscreen((current) => !current)}
-                        type="button"
-                      >
-                        {isMapFullscreen ? "地図を戻す" : "地図を大きく表示"}
+                    </div>
+                  ) : null}
+                  {(cameraState.status === "permission-denied" ||
+                    cameraState.status === "unsupported" ||
+                    cameraState.status === "error") && (
+                    <div className="camera-stage__actions">
+                      <button className="secondary-button" onClick={retryCamera} type="button">
+                        カメラを再取得
                       </button>
                     </div>
+                  )}
+                </div>
+              }
+              centerAction={
+                <button
+                  aria-disabled={cameraState.status !== "ready"}
+                  className={`shutter-button ${cameraState.status !== "ready" ? "shutter-button--disabled" : ""}`}
+                  disabled={cameraState.status !== "ready"}
+                  onClick={capturePhoto}
+                  type="button"
+                >
+                  <span className="shutter-button__inner" />
+                </button>
+              }
+              bottom={
+                <MapArea
+                  appPosition={gpsPosition}
+                  locationState={locationState}
+                  mapsStatus={mapsStatus.status}
+                  retryLocationRequest={() => void retryLocationRequest()}
+                  zoom={MAP_ZOOM.main}
+                />
+              }
+            />
+          </ScreenFrame>
+        ) : null}
+
+        {screen === "photo-confirmed" ? (
+          <ScreenFrame showBack onBack={goToTitle}>
+            <SplitPanel
+              top={
+                <CameraPreview
+                  cameraState={cameraState}
+                  capturedImageDataUrl={cameraState.capturedImageDataUrl}
+                  mode="captured"
+                  videoRef={videoRef}
+                />
+              }
+              centerAction={
+                <button
+                  className={`hoi-button ${streetViewState.status !== "success" ? "hoi-button--disabled" : ""}`}
+                  disabled={streetViewState.status !== "success"}
+                  onClick={completeHoi}
+                  type="button"
+                >
+                  HOI
+                </button>
+              }
+              bottom={
+                <StreetViewPanel
+                  currentHeading={viewHeading}
+                  currentPosition={streetViewPosition}
+                  distanceFromGpsMeters={distanceFromGpsMeters}
+                  onHeadingChange={handleStreetViewHeadingChange}
+                  onPositionChange={handleStreetViewPositionChange}
+                  streetViewState={streetViewState}
+                />
+              }
+            />
+          </ScreenFrame>
+        ) : null}
+
+        {screen === "hoi-completed" ? (
+          <ScreenFrame showBack onBack={goToTitle}>
+            <SplitPanel
+              fullMap={isMapFullscreen}
+              top={
+                <StreetViewPanel
+                  currentHeading={viewHeading}
+                  currentPosition={appPosition}
+                  distanceFromGpsMeters={distanceFromGpsMeters}
+                  onHeadingChange={handleStreetViewHeadingChange}
+                  onPositionChange={handleStreetViewPositionChange}
+                  streetViewState={streetViewState}
+                />
+              }
+              bottom={
+                <div className="map-stage">
+                  <div className="map-stage__surface">
+                    <MapArea
+                      appPosition={appPosition}
+                      fullMap={isMapFullscreen}
+                      heading={viewHeading}
+                      locationState={locationState}
+                      mapsStatus={mapsStatus.status}
+                      orientationMode={mapOrientationMode}
+                      retryLocationRequest={() => void retryLocationRequest()}
+                      showGpsMarker
+                      zoom={MAP_ZOOM.hoiCompleted}
+                    />
                   </div>
-                }
-              />
-            </ScreenFrame>
-          ) : null}
-        </div>
+                  <div className="map-stage__actions">
+                    <div className="map-controls">
+                      <HoiMapControls
+                        canReturnToCurrentLocation={
+                          gpsPosition !== null || locationState.status === "success"
+                        }
+                        isMapFullscreen={isMapFullscreen}
+                        mapOrientationMode={mapOrientationMode}
+                        mapUrl={mapUrl}
+                        onReturnToCurrentLocation={() => void handleReturnToCurrentLocation()}
+                        onToggleFullscreen={() => setIsMapFullscreen((current) => !current)}
+                        onToggleOrientationMode={() =>
+                          setMapOrientationMode((current) =>
+                            current === "north-up" ? "heading-up" : "north-up",
+                          )
+                        }
+                        streetViewUrl={streetViewUrl}
+                      />
+                    </div>
+                  </div>
+                </div>
+              }
+            />
+          </ScreenFrame>
+        ) : null}
       </div>
     </main>
   );
+}
+
+type MapAreaProps = {
+  locationState: CurrentLocationState;
+  mapsStatus: string;
+  retryLocationRequest: () => void;
+  zoom: number;
+  fullMap?: boolean;
+  orientationMode?: MapOrientationMode;
+  heading?: number | null;
+  appPosition?: GoogleMapsCoordinates | null;
+  showGpsMarker?: boolean;
+};
+
+function MapArea({
+  locationState,
+  mapsStatus,
+  retryLocationRequest,
+  zoom,
+  fullMap = false,
+  orientationMode = "north-up",
+  heading = null,
+  appPosition = null,
+  showGpsMarker = false,
+}: MapAreaProps) {
+  if (mapsStatus === "missing-api-key") {
+    return <MapPlaceholder fullMap={fullMap} message="Google Maps の設定を追加すると地図を表示できます。" />;
+  }
+
+  if (locationState.status === "loading" || locationState.status === "idle") {
+    return <MapPlaceholder fullMap={fullMap} message="位置情報を取得しています。" tone="neutral" />;
+  }
+
+  if (locationState.status === "permission-denied" || locationState.status === "error") {
+    return (
+      <div className="map-error-state">
+        <MapPlaceholder fullMap={fullMap} message={locationState.errorMessage} />
+        <div className="map-error-state__actions">
+          <button className="secondary-button" onClick={retryLocationRequest} type="button">
+            位置情報を再取得
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <GoogleMapView
+      appPosition={appPosition}
+      fullMap={fullMap}
+      heading={heading}
+      interactive
+      locationState={locationState}
+      orientationMode={orientationMode}
+      showGpsMarker={showGpsMarker}
+      zoom={zoom}
+    />
+  );
+}
+
+function getCameraNotice(cameraState: CameraState): {
+  tone: "warning" | "neutral";
+  title: string;
+  message: string;
+} | null {
+  switch (cameraState.status) {
+    case "loading":
+      return {
+        tone: "neutral",
+        title: "カメラを起動中です",
+        message: "映像の準備ができるまで少し待ってください。",
+      };
+    case "permission-denied":
+      return {
+        tone: "warning",
+        title: "カメラを利用できません",
+        message: cameraState.errorMessage ?? "権限設定を見直してください。",
+      };
+    case "unsupported":
+    case "error":
+      return {
+        tone: "warning",
+        title: "カメラを起動できません",
+        message: cameraState.errorMessage ?? "端末やブラウザの設定を確認してください。",
+      };
+    default:
+      return null;
+  }
 }

@@ -5,3 +5,5 @@ dist
 .env.*.local
 firebase-debug.log
 *.tsbuildinfo
+# Firebase local cache
+.firebase/
