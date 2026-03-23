@@ -7,3 +7,6 @@ firebase-debug.log
 *.tsbuildinfo
 # Firebase local cache
 .firebase/
+
+vite.config.js
+vite.config.d.ts
