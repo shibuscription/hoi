@@ -8,5 +8,6 @@ firebase-debug.log
 # Firebase local cache
 .firebase/
 
+# generated config artifacts
 vite.config.js
 vite.config.d.ts
