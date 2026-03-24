@@ -64,9 +64,14 @@ export function StreetViewPanel({
         visible: true,
         addressControl: false,
         fullscreenControl: false,
+        linksControl: true,
+        clickToGo: true,
+        panControl: false,
+        enableCloseButton: false,
         motionTracking: false,
-        showRoadLabels: true,
-        zoomControl: true,
+        motionTrackingControl: false,
+        showRoadLabels: false,
+        zoomControl: false,
         position: initialPosition,
         pov: {
           heading: initialHeading,
@@ -92,7 +97,8 @@ export function StreetViewPanel({
       const panorama = panoramaRef.current;
 
       const syncHeading = () => {
-        onHeadingChange?.(normalizeHeading(panorama.getPov().heading));
+        const nextHeading = normalizeHeading(panorama.getPov().heading);
+        onHeadingChange?.(nextHeading);
       };
 
       const syncPosition = () => {
@@ -103,10 +109,11 @@ export function StreetViewPanel({
           return;
         }
 
-        onPositionChange?.({
+        const nextPosition = {
           latitude: position.lat(),
           longitude: position.lng(),
-        });
+        };
+        onPositionChange?.(nextPosition);
       };
 
       syncHeading();

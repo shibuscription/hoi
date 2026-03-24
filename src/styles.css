@@ -230,6 +230,45 @@ a {
   grid-template-rows: 1fr 1fr;
 }
 
+.workflow-layout {
+  position: relative;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+}
+
+.workflow-layout__secondary,
+.workflow-layout__street {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.workflow-layout__secondary {
+  grid-row: 1;
+}
+
+.workflow-layout__street {
+  grid-row: 2;
+}
+
+.workflow-layout--hoi-completed .workflow-layout__secondary {
+  grid-row: 2;
+}
+
+.workflow-layout--hoi-completed .workflow-layout__street {
+  grid-row: 1;
+}
+
+.workflow-layout--map-full {
+  grid-template-rows: 0fr 1fr;
+}
+
+.workflow-layout--map-full .workflow-layout__street {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .split-layout--map-full {
   grid-template-rows: 0fr 1fr;
 }

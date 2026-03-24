@@ -321,93 +321,84 @@ export default function App() {
           </ScreenFrame>
         ) : null}
 
-        {screen === "photo-confirmed" ? (
+        {screen === "photo-confirmed" || screen === "hoi-completed" ? (
           <ScreenFrame showBack onBack={goToTitle}>
-            <SplitPanel
-              top={
-                <CameraPreview
-                  cameraState={cameraState}
-                  capturedImageDataUrl={cameraState.capturedImageDataUrl}
-                  mode="captured"
-                  videoRef={videoRef}
-                />
-              }
-              centerAction={
-                <button
-                  className={`hoi-button ${streetViewState.status !== "success" ? "hoi-button--disabled" : ""}`}
-                  disabled={streetViewState.status !== "success"}
-                  onClick={completeHoi}
-                  type="button"
-                >
-                  HOI
-                </button>
-              }
-              bottom={
-                <StreetViewPanel
-                  currentHeading={viewHeading}
-                  currentPosition={streetViewPosition}
-                  distanceFromGpsMeters={distanceFromGpsMeters}
-                  onHeadingChange={handleStreetViewHeadingChange}
-                  onPositionChange={handleStreetViewPositionChange}
-                  streetViewState={streetViewState}
-                />
-              }
-            />
-          </ScreenFrame>
-        ) : null}
-
-        {screen === "hoi-completed" ? (
-          <ScreenFrame showBack onBack={goToTitle}>
-            <SplitPanel
-              fullMap={isMapFullscreen}
-              top={
-                <StreetViewPanel
-                  currentHeading={viewHeading}
-                  currentPosition={appPosition}
-                  distanceFromGpsMeters={distanceFromGpsMeters}
-                  onHeadingChange={handleStreetViewHeadingChange}
-                  onPositionChange={handleStreetViewPositionChange}
-                  streetViewState={streetViewState}
-                />
-              }
-              bottom={
-                <div className="map-stage">
-                  <div className="map-stage__surface">
-                    <MapArea
-                      appPosition={appPosition}
-                      fullMap={isMapFullscreen}
-                      heading={viewHeading}
-                      locationState={locationState}
-                      mapsStatus={mapsStatus.status}
-                      orientationMode={mapOrientationMode}
-                      retryLocationRequest={() => void retryLocationRequest()}
-                      showGpsMarker
-                      zoom={MAP_ZOOM.hoiCompleted}
-                    />
-                  </div>
-                  <div className="map-stage__actions">
-                    <div className="map-controls">
-                      <HoiMapControls
-                        canReturnToCurrentLocation={
-                          gpsPosition !== null || locationState.status === "success"
-                        }
-                        isMapFullscreen={isMapFullscreen}
-                        mapOrientationMode={mapOrientationMode}
-                        mapUrl={mapUrl}
-                        onReturnToCurrentLocation={() => void handleReturnToCurrentLocation()}
-                        onToggleFullscreen={() => setIsMapFullscreen((current) => !current)}
-                        onToggleOrientationMode={() =>
-                          setMapOrientationMode((current) =>
-                            current === "north-up" ? "heading-up" : "north-up",
-                          )
-                        }
-                        streetViewUrl={streetViewUrl}
+            <div
+              className={`workflow-layout ${
+                screen === "hoi-completed" ? "workflow-layout--hoi-completed" : ""
+              } ${isMapFullscreen ? "workflow-layout--map-full" : ""}`}
+            >
+              <div className="workflow-layout__secondary panel">
+                {screen === "photo-confirmed" ? (
+                  <CameraPreview
+                    cameraState={cameraState}
+                    capturedImageDataUrl={cameraState.capturedImageDataUrl}
+                    mode="captured"
+                    videoRef={videoRef}
+                  />
+                ) : (
+                  <div className="map-stage">
+                    <div className="map-stage__surface">
+                      <MapArea
+                        appPosition={appPosition}
+                        fullMap={isMapFullscreen}
+                        heading={viewHeading}
+                        locationState={locationState}
+                        mapsStatus={mapsStatus.status}
+                        orientationMode={mapOrientationMode}
+                        retryLocationRequest={() => void retryLocationRequest()}
+                        showGpsMarker
+                        zoom={MAP_ZOOM.hoiCompleted}
                       />
                     </div>
+                    <div className="map-stage__actions">
+                      <div className="map-controls">
+                        <HoiMapControls
+                          canReturnToCurrentLocation={
+                            gpsPosition !== null || locationState.status === "success"
+                          }
+                          isMapFullscreen={isMapFullscreen}
+                          mapOrientationMode={mapOrientationMode}
+                          mapUrl={mapUrl}
+                          onReturnToCurrentLocation={() => void handleReturnToCurrentLocation()}
+                          onToggleFullscreen={() => setIsMapFullscreen((current) => !current)}
+                          onToggleOrientationMode={() =>
+                            setMapOrientationMode((current) =>
+                              current === "north-up" ? "heading-up" : "north-up",
+                            )
+                          }
+                          streetViewUrl={streetViewUrl}
+                        />
+                      </div>
+                    </div>
                   </div>
+                )}
+              </div>
+
+              <div className="workflow-layout__street panel">
+                <StreetViewPanel
+                  currentHeading={viewHeading}
+                  currentPosition={screen === "hoi-completed" ? appPosition : streetViewPosition}
+                  distanceFromGpsMeters={distanceFromGpsMeters}
+                  onHeadingChange={handleStreetViewHeadingChange}
+                  onPositionChange={handleStreetViewPositionChange}
+                  streetViewState={streetViewState}
+                />
+              </div>
+
+              {screen === "photo-confirmed" ? (
+                <div className="split-layout__center-action">
+                  <button
+                    className={`hoi-button ${streetViewState.status !== "success" ? "hoi-button--disabled" : ""}`}
+                    disabled={streetViewState.status !== "success"}
+                    onClick={completeHoi}
+                    type="button"
+                  >
+                    HOI
+                  </button>
                 </div>
-              }
-            />
+              ) : null}
+            </div>
           </ScreenFrame>
         ) : null}
       </div>
