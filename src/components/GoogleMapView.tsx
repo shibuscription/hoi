@@ -84,11 +84,11 @@ export function GoogleMapView({
         const options: google.maps.MapOptions = {
           center: focusCenter,
           zoom,
-          disableDefaultUI: !interactive,
+          disableDefaultUI: true,
           clickableIcons: interactive,
           gestureHandling: interactive ? "greedy" : "none",
           keyboardShortcuts: interactive,
-          zoomControl: interactive,
+          zoomControl: false,
           mapTypeControl: false,
           fullscreenControl: false,
           streetViewControl: false,

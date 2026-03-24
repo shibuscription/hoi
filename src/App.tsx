@@ -237,6 +237,7 @@ export default function App() {
               <div className="title-screen__content-layer">
                 <div className="title-screen__content">
                   <h1>あっち向いてHOI</h1>
+                  <p className="title-screen__subtitle">Heading Oriented Interface</p>
                   {(locationState.status === "permission-denied" ||
                     locationState.status === "error") && (
                     <div className="title-screen__location-note">
